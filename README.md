@@ -1,3 +1,13 @@
+---
+title: Lecture RAG Assistant
+emoji: 📚
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 8501
+pinned: false
+---
+
 # Lecture Notes Assistant — RAG-based Q&A System
 
 An AI assistant that answers questions from your own lecture notes and recordings.
@@ -7,7 +17,7 @@ An AI assistant that answers questions from your own lecture notes and recording
 - **LangChain** — chunking, retrieval chain, prompt management
 - **HuggingFace Embeddings** — all-MiniLM-L6-v2 for local embeddings
 - **ChromaDB** — local vector database for semantic search
-- **Gemini 1.5 Flash** — LLM for grounded answer generation
+- **Gemini 2.5 Flash** — LLM for grounded answer generation
 - **Streamlit** — interactive web UI
 
 ## How It Works
