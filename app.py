@@ -85,18 +85,33 @@ def ingest_uploaded_file(uploaded_file):
 
     # Extract text
     if ext == "pdf":
-        doc = fitz.open(tmp_path)
-        text = "\n".join([page.get_text() for page in doc])
-        doc.close()
+        try:
+            doc = fitz.open(tmp_path)
+            text = "\n".join([page.get_text() for page in doc])
+            doc.close()
+        except Exception as e:
+            st.error(f"Could not read PDF {filename}: {e}")
+            os.unlink(tmp_path)
+            return 0
     elif ext in ["mp3", "mp4", "wav", "m4a", "webm"]:
         with st.spinner(f"Transcribing {filename} with Whisper..."):
-            result = whisper_model.transcribe(tmp_path)
-            text = result["text"]
+            try:
+                result = whisper_model.transcribe(tmp_path)
+                text = result["text"]
+            except Exception as e:
+                st.error(f"Transcription failed for {filename}: {e}")
+                os.unlink(tmp_path)
+                return 0
     else:
         st.error(f"Unsupported file type: {ext}")
+        os.unlink(tmp_path)
         return 0
 
     os.unlink(tmp_path)  # clean up temp file
+
+    if not text.strip():
+        st.warning(f"No text could be extracted from {filename}")
+        return 0
 
     # Chunk and store
     chunks = splitter.split_text(text)
@@ -169,6 +184,9 @@ with col2:
         ["All files"] + get_ingested_filenames()
     )
 
+# Tune this after checking scores for relevant vs irrelevant questions
+SIMILARITY_THRESHOLD = 1.5
+
 if st.button("Ask", type="primary") and question:
     if vectorstore._collection.count() == 0:
         st.warning("No content in database yet. Upload some files first.")
@@ -179,27 +197,30 @@ if st.button("Ask", type="primary") and question:
             if file_filter != "All files":
                 search_kwargs["filter"] = {"source": file_filter}
 
-            # Build LangChain RetrievalQA chain
-            qa_chain = RetrievalQA.from_chain_type(
-                llm=llm,
-                chain_type="stuff",       # stuff = put all chunks in one prompt
-                retriever=vectorstore.as_retriever(
-                    search_kwargs=search_kwargs
-                ),
-                return_source_documents=True
+            # Check relevance before generating an answer
+            docs_with_scores = vectorstore.similarity_search_with_score(
+                question, k=top_k, filter=search_kwargs.get("filter")
             )
 
-            result = qa_chain.invoke({"query": question})
+            if not docs_with_scores or docs_with_scores[0][1] > SIMILARITY_THRESHOLD:
+                st.markdown("### Answer")
+                st.warning("I don't have enough relevant information in the uploaded documents to answer this confidently.")
+            else:
+                qa_chain = RetrievalQA.from_chain_type(
+                    llm=llm,
+                    chain_type="stuff",
+                    retriever=vectorstore.as_retriever(search_kwargs=search_kwargs),
+                    return_source_documents=True
+                )
+                result = qa_chain.invoke({"query": question})
 
-        # Display answer
-        st.markdown("### Answer")
-        st.write(result["result"])
+                st.markdown("### Answer")
+                st.write(result["result"])
 
-        # Display sources
-        with st.expander("📄 Retrieved chunks (what Gemini used)"):
-            for i, doc in enumerate(result["source_documents"]):
-                src = doc.metadata.get("source", "unknown")
-                idx = doc.metadata.get("chunk_index", "?")
-                st.markdown(f"**Chunk {i+1}** — `{src}` (chunk #{idx})")
-                st.text(doc.page_content[:400] + "...")
-                st.divider()
+                with st.expander("📄 Retrieved chunks (what Gemini used)"):
+                    for i, doc in enumerate(result["source_documents"]):
+                        src = doc.metadata.get("source", "unknown")
+                        idx = doc.metadata.get("chunk_index", "?")
+                        st.markdown(f"**Chunk {i+1}** — `{src}` (chunk #{idx})")
+                        st.text(doc.page_content[:400] + "...")
+                        st.divider()

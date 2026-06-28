@@ -26,19 +26,27 @@ splitter = RecursiveCharacterTextSplitter(
 
 # ── PDF extraction ───────────────────────────────────────────────
 def extract_from_pdf(pdf_path):
-    doc = fitz.open(pdf_path)
-    full_text = "\n".join([page.get_text() for page in doc])
-    doc.close()
-    print(f"  Extracted {len(full_text)} characters from PDF")
-    return full_text
+    try:
+        doc = fitz.open(pdf_path)
+        full_text = "\n".join([page.get_text() for page in doc])
+        doc.close()
+        print(f"  Extracted {len(full_text)} characters from PDF")
+        return full_text
+    except Exception as e:
+        print(f"  ERROR: Could not extract PDF {pdf_path}: {e}")
+        return ""
 
 
 # ── Audio/Video transcription ────────────────────────────────────
 def extract_from_audio(audio_path):
     print(f"  Transcribing audio (this takes a minute)...")
-    result = whisper_model.transcribe(audio_path)
-    print(f"  Transcribed {len(result['text'])} characters")
-    return result["text"]
+    try:
+        result = whisper_model.transcribe(audio_path)
+        print(f"  Transcribed {len(result['text'])} characters")
+        return result["text"]
+    except Exception as e:
+        print(f"  ERROR: Could not transcribe {audio_path}: {e}")
+        return ""
 
 
 # ── Main ingest function ─────────────────────────────────────────
@@ -57,6 +65,11 @@ def ingest_file(file_path):
         print(f"  Skipping unsupported file type: {ext}")
         return
 
+    # Step 1b: Skip if extraction failed or produced nothing
+    if not text.strip():
+        print(f"  Skipping {filename} — no text extracted")
+        return
+
     # Step 2: Chunk with LangChain splitter
     chunks = splitter.split_text(text)
     print(f"  Split into {len(chunks)} chunks")
@@ -72,13 +85,16 @@ def ingest_file(file_path):
     ]
 
     # Step 4: Store in ChromaDB (LangChain handles embedding automatically)
-    vectorstore = Chroma(
-        collection_name="lecture_notes",
-        embedding_function=embedding_model,
-        persist_directory="./chroma_db"
-    )
-    vectorstore.add_texts(texts=chunks, metadatas=metadatas, ids=ids)
-    print(f"  Stored in ChromaDB successfully (duplicates automatically skipped)")
+    try:
+        vectorstore = Chroma(
+            collection_name="lecture_notes",
+            embedding_function=embedding_model,
+            persist_directory="./chroma_db"
+        )
+        vectorstore.add_texts(texts=chunks, metadatas=metadatas, ids=ids)
+        print(f"  Stored in ChromaDB successfully (duplicates automatically skipped)")
+    except Exception as e:
+        print(f"  ERROR: Could not store {filename} in ChromaDB: {e}")
 
 
 # ── Run on all files in data/ ────────────────────────────────────
